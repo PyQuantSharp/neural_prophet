@@ -5,15 +5,15 @@ import math
 import os
 import sys
 from collections import OrderedDict
-from typing import TYPE_CHECKING, Iterable, Optional, Union
+from typing import IO, TYPE_CHECKING, BinaryIO, Optional, Union
 
 import numpy as np
 import pandas as pd
 import pytorch_lightning as pl
 import torch
+from lightning_fabric.utilities.seed import seed_everything
 
 from neuralprophet import utils_torch
-from neuralprophet.hdays_utils import get_country_holidays
 from neuralprophet.logger import ProgressBar
 
 if TYPE_CHECKING:
@@ -21,19 +21,24 @@ if TYPE_CHECKING:
 
 log = logging.getLogger("NP.utils")
 
+FILE_LIKE = Union[str, os.PathLike, BinaryIO, IO[bytes]]
 
-def save(forecaster, path: str):
+
+def save(forecaster, path: FILE_LIKE):
     """Save a fitted Neural Prophet model to disk.
 
     Parameters:
         forecaster : np.forecaster.NeuralProphet
             input forecaster that is fitted
-        path : str
-            path and filename to be saved. filename could be any but suggested to have extension .np.
+        path : FILE_LIKE
+            Path and filename to be saved, or an in-memory buffer. Filename could be any but suggested to have extension .np.
 
     After you fitted a model, you may save the model to save_test_model.np
         >>> from neuralprophet import save
         >>> save(forecaster, "test_save_model.np")
+        >>> import io
+        >>> buffer = io.BytesIO()
+        >>> save(forecaster, buffer)
     """
     # List of attributes to remove
     attrs_to_remove_forecaster = ["trainer"]
@@ -69,13 +74,13 @@ def save(forecaster, path: str):
                 setattr(forecaster.model, attr, value)
 
 
-def load(path: str, map_location=None):
-    """retrieve a fitted model from a .np file that was saved by save.
+def load(path: FILE_LIKE, map_location=None):
+    """retrieve a fitted model from a .np file or buffer that was saved by save.
 
     Parameters
     ----------
-        path : str
-            path and filename to be saved. filename could be any but suggested to have extension .np.
+        path : FILE_LIKE
+            Path and filename to be saved, or an in-memory buffer. Filename could be any but suggested to have extension .np.
         map_location : str, optional
             specifying the location where the model should be loaded.
             If you are running on a CPU-only machine, set map_location='cpu' to map your storages to the CPU.
@@ -369,41 +374,6 @@ def config_seasonality_to_model_dims(config_seasonality: ConfigSeasonality):
             resolution = 2 * resolution
         seasonal_dims[name] = resolution
     return seasonal_dims
-
-
-def get_holidays_from_country(country: Union[str, Iterable[str]], df=None):
-    """
-    Return all possible holiday names of given country
-
-    Parameters
-    ----------
-        country : str, list
-            List of country names to retrieve country specific holidays
-        df : pd.Dataframe
-            Dataframe from which datestamps will be retrieved from
-
-    Returns
-    -------
-        set
-            All possible holiday names of given country
-    """
-    if df is None:
-        years = np.arange(1995, 2045)
-    else:
-        dates = df["ds"].copy(deep=True)
-        years = list({x.year for x in dates})
-    # support multiple countries
-    if isinstance(country, str):
-        country = [country]
-
-    unique_holidays = {}
-    for single_country in country:
-        holidays_country = get_country_holidays(single_country, years)
-        for date, name in holidays_country.items():
-            if date not in unique_holidays:
-                unique_holidays[date] = name
-    holiday_names = unique_holidays.values()
-    return set(holiday_names)
 
 
 def config_events_to_model_dims(config_events: Optional[ConfigEvents], config_country_holidays):
@@ -741,6 +711,7 @@ def set_random_seed(seed: int = 0):
     """
     np.random.seed(seed)
     torch.manual_seed(seed)
+    seed_everything(seed, workers=True)
 
 
 def set_logger_level(logger, log_level, include_handlers=False):
@@ -849,6 +820,7 @@ def configure_trainer(
     metrics_enabled: bool = False,
     checkpointing_enabled: bool = False,
     num_batches_per_epoch: int = 100,
+    deterministic: bool = False,
 ):
     """
     Configures the PyTorch Lightning trainer.
@@ -886,10 +858,6 @@ def configure_trainer(
     """
     config = config.copy()
 
-    # Enable Learning rate finder if not learning rate provided
-    if config_train.learning_rate is None:
-        config["auto_lr_find"] = True
-
     # Set max number of epochs
     if hasattr(config_train, "epochs"):
         if config_train.epochs is not None:
@@ -922,6 +890,8 @@ def configure_trainer(
         config["logger"] = metrics_logger
     else:
         config["logger"] = False
+
+    config["deterministic"] = deterministic
 
     # Configure callbacks
     callbacks = []

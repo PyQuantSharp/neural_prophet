@@ -13,8 +13,9 @@ import numpy as np
 import pandas as pd
 import torch
 
-from neuralprophet import df_utils, np_types, utils, utils_torch
+from neuralprophet import df_utils, np_types, utils_torch
 from neuralprophet.custom_loss_metrics import PinballLoss
+from neuralprophet.event_utils import get_holiday_names
 
 log = logging.getLogger("NP.config")
 
@@ -41,10 +42,9 @@ class Normalization:
         config_events: Optional[ConfigEvents] = None,
         config_seasonality: Optional[ConfigSeasonality] = None,
     ):
-        if len(df["ID"].unique()) == 1:
-            if not self.global_normalization:
-                log.info("Setting normalization to global as only one dataframe provided for training.")
-                self.global_normalization = True
+        if len(df["ID"].unique()) == 1 and not self.global_normalization:
+            log.info("Setting normalization to global as only one dataframe provided for training.")
+            self.global_normalization = True
         self.local_data_params, self.global_data_params = df_utils.init_data_params(
             df=df,
             normalize=self.normalize,
@@ -304,18 +304,16 @@ class Trend:
             log.error("Invalid growth for global_local mode '{}'. Set to 'global'".format(self.trend_global_local))
             self.trend_global_local = "global"
 
-        # If trend_local_reg < 0
         if self.trend_local_reg < 0:
             log.error("Invalid  negative trend_local_reg '{}'. Set to False".format(self.trend_local_reg))
             self.trend_local_reg = False
 
-        # If trend_local_reg = True
-        if self.trend_local_reg == True:
+        if self.trend_local_reg is True:
             log.error("trend_local_reg = True. Default trend_local_reg value set to 1")
             self.trend_local_reg = 1
 
-        # If Trend modelling is global.
-        if self.trend_global_local == "global" and self.trend_local_reg != False:
+        # If Trend modelling is global but local regularization is set.
+        if self.trend_global_local == "global" and self.trend_local_reg:
             log.error("Trend modeling is '{}'. Setting the trend_local_reg to False".format(self.trend_global_local))
             self.trend_local_reg = False
 
@@ -391,18 +389,14 @@ class ConfigSeasonality:
             }
         )
 
-        # If seasonality_local_reg < 0
-        if self.seasonality_local_reg < 0:
-            log.error("Invalid  negative seasonality_local_reg '{}'. Set to False".format(self.seasonality_local_reg))
-            self.seasonality_local_reg = False
+        assert self.seasonality_local_reg >= 0, "Invalid seasonality_local_reg '{}'.".format(self.seasonality_local_reg)
 
-        # If seasonality_local_reg = True
-        if self.seasonality_local_reg == True:
-            log.error("seasonality_local_reg = True. Default seasonality_local_reg value set to 1")
+        if self.seasonality_local_reg is True:
+            log.warning("seasonality_local_reg = True. Default seasonality_local_reg value set to 1")
             self.seasonality_local_reg = 1
 
-        # If Season modelling is global.
-        if self.global_local == "global" and self.seasonality_local_reg != False:
+        # If Season modelling is global but local regularization is set.
+        if self.global_local == "global" and self.seasonality_local_reg:
             log.error(
                 "Seasonality modeling is '{}'. Setting the seasonality_local_reg to False".format(self.global_local)
             )
@@ -425,6 +419,8 @@ class AR:
     ar_layers: Optional[List[int]] = None
 
     def __post_init__(self):
+        if self.ar_reg is not None and self.n_lags == 0:
+            raise ValueError("AR regularization is set, but n_lags is 0. Please set n_lags to a positive integer.")
         if self.ar_reg is not None and self.ar_reg > 0:
             if self.ar_reg < 0:
                 raise ValueError("regularization must be >= 0")
@@ -503,7 +499,7 @@ ConfigEvents = OrderedDictType[str, Event]
 
 @dataclass
 class Holidays:
-    country: Union[str, List[str]]
+    country: Union[str, List[str], dict]
     lower_window: int
     upper_window: int
     mode: str = "additive"
@@ -511,7 +507,7 @@ class Holidays:
     holiday_names: set = field(init=False)
 
     def init_holidays(self, df=None):
-        self.holiday_names = utils.get_holidays_from_country(self.country, df)
+        self.holiday_names = get_holiday_names(self.country, df)
 
 
 ConfigCountryHolidays = Holidays

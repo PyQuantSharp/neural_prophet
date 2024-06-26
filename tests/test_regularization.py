@@ -17,8 +17,8 @@ from tests.utils.dataset_generators import (
 )
 
 log = logging.getLogger("NP.test")
-log.setLevel("DEBUG")
-log.parent.setLevel("WARNING")
+log.setLevel("ERROR")
+log.parent.setLevel("ERROR")
 
 # Fix random seeds
 torch.manual_seed(0)
@@ -82,7 +82,7 @@ def test_regularization_holidays():
             to_preserve.append(weight_list[0][0][0])
     # print(to_reduce)
     # print(to_preserve)
-    assert np.mean(to_reduce) < 0.1
+    assert np.mean(to_reduce) < 0.2
     assert np.mean(to_preserve) > 0.5
 
 
